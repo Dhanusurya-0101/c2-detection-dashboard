@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>C2 Sentinel // Real-Time C2 Detection & Packet Sniffer</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            cyber: {
+              900: '#070a12',
+              800: '#0b1120',
+              700: '#111b33',
+              600: '#1b2a4e',
+              neon: '#00f3ff',
+              emerald: '#10b981',
+              rose: '#f43f5e',
+              amber: '#f59e0b',
+              purple: '#8b5cf6'
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-[#070a12] text-slate-200 font-sans min-h-screen flex flex-col selection:bg-cyan-500 selection:text-black">
+
+  <!-- TOP NAVIGATION / CONTROL BAR -->
+  <header class="border-b border-slate-800/80 bg-[#0b1120]/90 backdrop-blur-md sticky top-0 z-40 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+    <!-- Brand -->
+    <div class="flex items-center gap-3">
+      <div class="p-2 rounded-lg bg-cyan-950 border border-cyan-500/40 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.3)]">
+        <i data-lucide="shield-alert" class="w-6 h-6"></i>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="font-black tracking-wider text-lg text-white">C2 SENTINEL</h1>
+          <span class="text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded bg-cyan-900/60 text-cyan-300 border border-cyan-700/50">v2.0 LIVE</span>
+        </div>
+        <p class="text-xs text-slate-400">Network Packet Sniffer & C2 Beaconing Detection Engine</p>
+      </div>
+    </div>
+
+    <!-- Live Controls -->
+    <div class="flex flex-wrap items-center gap-3">
+      <!-- Interface Selector -->
+      <div class="flex items-center gap-2 bg-slate-900/80 border border-slate-700/70 rounded-lg px-3 py-1.5 text-xs">
+        <i data-lucide="network" class="w-4 h-4 text-cyan-400"></i>
+        <label for="ifaceSelect" class="text-slate-400">Interface:</label>
+        <select id="ifaceSelect" class="bg-transparent text-white focus:outline-none cursor-pointer max-w-[200px] truncate">
+          <option value="default">Default Interface</option>
+        </select>
+      </div>
+
+      <!-- Start / Stop Sniffing Button -->
+      <button id="btnToggleSniff" class="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all duration-200 bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+        <i data-lucide="play" class="w-4 h-4"></i>
+        <span>START SNIFFER</span>
+      </button>
+
+      <!-- Simulate C2 Traffic Toggle Button -->
+      <button id="btnToggleSim" class="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all duration-200 bg-purple-900/40 hover:bg-purple-800/60 text-purple-300 border border-purple-500/40">
+        <i data-lucide="cpu" class="w-4 h-4"></i>
+        <span>SIMULATE C2 ATTACK</span>
+      </button>
+
+      <!-- Auto-Block Toggle Button -->
+      <button id="btnToggleAutoBlock" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all duration-200 bg-slate-900 border border-slate-700/80 text-slate-400 hover:text-white" title="Auto-quarantine Critical C2 Threat IPs via Windows Firewall">
+        <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400" id="autoBlockIcon"></i>
+        <span id="autoBlockBtnText">AUTO-BLOCK: OFF</span>
+      </button>
+
+      <!-- Clear Data -->
+      <button id="btnClear" class="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition" title="Clear Traffic History">
+        <i data-lucide="trash-2" class="w-4 h-4"></i>
+      </button>
+
+      <!-- Connection Status Badge -->
+      <div id="connStatusBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-medium text-slate-400">
+        <span class="relative flex h-2.5 w-2.5">
+          <span id="connPing" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span id="connDot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+        </span>
+        <span id="connText">Connected</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN BODY LAYOUT -->
+  <main class="flex-1 p-6 space-y-6 max-w-[1700px] w-full mx-auto">
+
+    <!-- KPI STATS OVERVIEW -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+      <!-- Total Packets -->
+      <div class="stat-card">
+        <div class="flex items-center justify-between text-slate-400">
+          <span class="text-xs uppercase tracking-wider font-semibold">Total Packets</span>
+          <i data-lucide="layers" class="w-4 h-4 text-cyan-400"></i>
+        </div>
+        <div class="mt-2 text-2xl font-black text-white" id="statTotalPackets">0</div>
+        <div class="text-[11px] text-slate-500 mt-1">Processed in session</div>
+      </div>
+
+      <!-- Live Packets / Sec -->
+      <div class="stat-card">
+        <div class="flex items-center justify-between text-slate-400">
+          <span class="text-xs uppercase tracking-wider font-semibold">Throughput (PPS)</span>
+          <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i>
+        </div>
+        <div class="mt-2 text-2xl font-black text-emerald-400" id="statPPS">0</div>
+        <div class="text-[11px] text-slate-500 mt-1">Packets per second</div>
+      </div>
+
+      <!-- Total Threats -->
+      <div class="stat-card border-rose-500/30">
+        <div class="flex items-center justify-between text-slate-400">
+          <span class="text-xs uppercase tracking-wider font-semibold">C2 Threats Flagged</span>
+          <i data-lucide="alert-triangle" class="w-4 h-4 text-rose-400"></i>
+        </div>
+        <div class="mt-2 text-2xl font-black text-rose-400" id="statThreats">0</div>
+        <div class="flex gap-2 text-[11px] mt-1">
+          <span class="text-rose-400 font-bold" id="statCritical">0 Crit</span>
+          <span class="text-amber-400 font-bold" id="statHigh">0 High</span>
+          <span class="text-yellow-400 font-bold" id="statMed">0 Med</span>
+        </div>
+      </div>
+
+      <!-- Quarantined / Blocked IPs -->
+      <div class="stat-card border-purple-500/40 bg-purple-950/10">
+        <div class="flex items-center justify-between text-slate-400">
+          <span class="text-xs uppercase tracking-wider font-semibold text-purple-300">Quarantined IPs</span>
+          <i data-lucide="shield-x" class="w-4 h-4 text-purple-400"></i>
+        </div>
+        <div class="mt-2 text-2xl font-black text-purple-400" id="statBlocked">0</div>
+        <div class="text-[11px] text-slate-500 mt-1" id="statAdminStatus">IPS Firewall Active</div>
+      </div>
+
+      <!-- Active Monitored Flows -->
+      <div class="stat-card">
+        <div class="flex items-center justify-between text-slate-400">
+          <span class="text-xs uppercase tracking-wider font-semibold">Tracked Flows</span>
+          <i data-lucide="git-merge" class="w-4 h-4 text-cyan-400"></i>
+        </div>
+        <div class="mt-2 text-2xl font-black text-cyan-400" id="statFlows">0</div>
+        <div class="text-[11px] text-slate-500 mt-1">Beacon analyzer</div>
+      </div>
+
+      <!-- Detection Status -->
+      <div class="stat-card">
+        <div class="flex items-center justify-between text-slate-400">
+          <span class="text-xs uppercase tracking-wider font-semibold">Engine State</span>
+          <i data-lucide="radar" class="w-4 h-4 text-cyan-400 animate-spin" style="animation-duration: 8s;"></i>
+        </div>
+        <div class="mt-2 text-base font-bold text-white flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          <span id="engineModeText">IDLE / READY</span>
+        </div>
+        <div class="text-[11px] text-slate-500 mt-1">IDS + IPS Active Defense</div>
+      </div>
+    </section>
+
+    <!-- ANALYTICS & THREAT FEEDS ROW -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- Chart: Live Throughput (7 cols) -->
+      <div class="lg:col-span-7 bg-[#0b1120] border border-slate-800 rounded-xl p-5 shadow-lg flex flex-col">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <i data-lucide="line-chart" class="w-4 h-4 text-cyan-400"></i>
+            <h2 class="font-bold text-sm tracking-wide text-white">LIVE TRAFFIC THROUGHPUT (PPS)</h2>
+          </div>
+          <span class="text-xs text-slate-500 font-mono">Window: 30s</span>
+        </div>
+        <div class="flex-1 min-h-[190px]">
+          <canvas id="ppsChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Chart: Protocol Distribution (5 cols) -->
+      <div class="lg:col-span-5 bg-[#0b1120] border border-slate-800 rounded-xl p-5 shadow-lg flex flex-col">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <i data-lucide="pie-chart" class="w-4 h-4 text-purple-400"></i>
+            <h2 class="font-bold text-sm tracking-wide text-white">PROTOCOL BREAKDOWN</h2>
+          </div>
+          <span class="text-xs text-slate-500 font-mono" id="protocolSummaryText">0 Total</span>
+        </div>
+        <div class="flex-1 min-h-[190px] flex items-center justify-center">
+          <canvas id="protocolChart" style="max-height: 180px;"></canvas>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ACTIVE C2 THREATS, BEACON FLOWS & FIREWALL QUARANTINE -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- C2 Threat Alerts Feed (5 cols) -->
+      <div class="lg:col-span-5 bg-[#0b1120] border border-slate-800 rounded-xl p-5 shadow-lg flex flex-col">
+        <div class="flex items-center justify-between mb-3 border-b border-slate-800/80 pb-3">
+          <div class="flex items-center gap-2">
+            <i data-lucide="flame" class="w-4 h-4 text-rose-500"></i>
+            <h2 class="font-bold text-sm tracking-wide text-white">C2 THREAT ALERTS</h2>
+          </div>
+          <span class="text-xs text-slate-400 font-mono" id="alertCountBadge">0 alerts</span>
+        </div>
+
+        <div id="alertsContainer" class="space-y-2.5 overflow-y-auto max-h-[220px] pr-1 scrollbar-thin">
+          <!-- Empty State -->
+          <div id="alertsEmptyState" class="text-center py-10 text-slate-500 text-xs">
+            <i data-lucide="shield-check" class="w-8 h-8 mx-auto text-emerald-500/40 mb-2"></i>
+            No active C2 threats detected yet. Start sniffing or toggle C2 attack simulation.
+          </div>
+        </div>
+      </div>
+
+      <!-- Active Beaconing Flow Statistics (4 cols) -->
+      <div class="lg:col-span-4 bg-[#0b1120] border border-slate-800 rounded-xl p-5 shadow-lg flex flex-col">
+        <div class="flex items-center justify-between mb-3 border-b border-slate-800/80 pb-3">
+          <div class="flex items-center gap-2">
+            <i data-lucide="radio" class="w-4 h-4 text-amber-400"></i>
+            <h2 class="font-bold text-sm tracking-wide text-white">BEACONING JITTER</h2>
+          </div>
+          <span class="text-xs text-slate-500 font-mono">Interval & Jitter</span>
+        </div>
+
+        <div id="flowStatsContainer" class="space-y-2 overflow-y-auto max-h-[220px] pr-1 scrollbar-thin">
+          <div id="flowStatsEmpty" class="text-center py-10 text-slate-500 text-xs">
+            <i data-lucide="clock" class="w-8 h-8 mx-auto text-slate-600 mb-2"></i>
+            Listening for periodic connection heartbeats...
+          </div>
+        </div>
+      </div>
+
+      <!-- Active Firewall Quarantine & Blocked IPs (3 cols) -->
+      <div class="lg:col-span-3 bg-[#0b1120] border border-purple-900/60 rounded-xl p-5 shadow-lg flex flex-col">
+        <div class="flex items-center justify-between mb-3 border-b border-slate-800/80 pb-3">
+          <div class="flex items-center gap-2">
+            <i data-lucide="shield-x" class="w-4 h-4 text-purple-400"></i>
+            <h2 class="font-bold text-sm tracking-wide text-white">QUARANTINE / IPS</h2>
+          </div>
+          <span class="text-xs text-purple-400 font-mono" id="quarantineCountBadge">0 blocked</span>
+        </div>
+
+        <div id="quarantineContainer" class="space-y-2 overflow-y-auto max-h-[220px] pr-1 scrollbar-thin">
+          <div id="quarantineEmpty" class="text-center py-10 text-slate-500 text-xs">
+            <i data-lucide="shield-check" class="w-8 h-8 mx-auto text-slate-600 mb-2"></i>
+            No IPs quarantined yet. Click "Block IP" on any threat.
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- LIVE PACKET STREAM TABLE -->
+    <section class="bg-[#0b1120] border border-slate-800 rounded-xl p-5 shadow-lg flex flex-col">
+      <!-- Table Controls Bar -->
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2">
+            <i data-lucide="list-filter" class="w-4 h-4 text-cyan-400"></i>
+            <h2 class="font-bold text-sm tracking-wide text-white">LIVE PACKET CAPTURE STREAM</h2>
+          </div>
+          <span class="text-xs text-slate-500 font-mono" id="packetBufferCount">Buffer: 0 / 150</span>
+        </div>
+
+        <!-- Filter & Search Controls -->
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Protocol Filter Tabs -->
+          <div class="flex bg-slate-900 rounded-lg p-1 border border-slate-800 text-xs font-semibold">
+            <button class="proto-btn active" data-proto="ALL">ALL</button>
+            <button class="proto-btn" data-proto="TCP">TCP</button>
+            <button class="proto-btn" data-proto="UDP">UDP</button>
+            <button class="proto-btn" data-proto="DNS">DNS</button>
+            <button class="proto-btn" data-proto="HTTP">HTTP</button>
+            <button class="proto-btn" data-proto="TLS/HTTPS">TLS</button>
+            <button class="proto-btn" data-proto="ARP">ARP</button>
+          </div>
+
+          <!-- Threat Filter -->
+          <select id="threatFilterSelect" class="bg-slate-900 border border-slate-700/70 text-slate-300 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none">
+            <option value="ALL">All Severity</option>
+            <option value="THREATS">Threats Only (Crit/High/Med)</option>
+            <option value="CRITICAL">Critical Only</option>
+            <option value="BLOCKED">Blocked IPs Only</option>
+          </select>
+
+          <!-- Search Box -->
+          <div class="relative">
+            <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400"></i>
+            <input type="text" id="searchInput" placeholder="Search IP, domain, port..." class="bg-slate-900 border border-slate-700/70 text-slate-200 text-xs rounded-lg pl-8 pr-3 py-1.5 focus:border-cyan-500 focus:outline-none w-52" />
+          </div>
+
+          <!-- Auto-scroll switch -->
+          <label class="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none">
+            <input type="checkbox" id="chkAutoScroll" checked class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0" />
+            <span>Auto-scroll</span>
+          </label>
+
+          <!-- Pause Stream toggle -->
+          <button id="btnPauseStream" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Pause Stream Rendering">
+            <i data-lucide="pause" class="w-4 h-4" id="pauseIcon"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Table Container -->
+      <div class="overflow-x-auto border border-slate-800/80 rounded-lg max-h-[500px] overflow-y-auto scrollbar-thin" id="packetTableWrapper">
+        <table class="w-full text-left text-xs font-mono">
+          <thead class="bg-slate-900/90 text-slate-400 uppercase tracking-wider sticky top-0 z-10 text-[11px] border-b border-slate-800">
+            <tr>
+              <th class="py-2.5 px-3">#</th>
+              <th class="py-2.5 px-3">Time</th>
+              <th class="py-2.5 px-3">Proto</th>
+              <th class="py-2.5 px-3">Source</th>
+              <th class="py-2.5 px-3">Destination</th>
+              <th class="py-2.5 px-3">Len</th>
+              <th class="py-2.5 px-3">Info / Payload Preview</th>
+              <th class="py-2.5 px-3">Threat Assessment</th>
+              <th class="py-2.5 px-3 text-center">Action</th>
+            </tr>
+          </thead>
+          <tbody id="packetTableBody" class="divide-y divide-slate-850">
+            <tr id="emptyTableNotice">
+              <td colspan="9" class="py-12 text-center text-slate-500 font-sans text-xs">
+                No packets captured yet. Select an interface and click <b>START SNIFFER</b> or <b>SIMULATE C2 ATTACK</b>.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- PACKET INSPECTOR MODAL -->
+  <div id="inspectorModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-[#0e1628] border border-cyan-500/40 rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col shadow-[0_0_50px_rgba(6,182,212,0.15)] animate-in fade-in zoom-in duration-200">
+      
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between p-5 border-b border-slate-800">
+        <div class="flex items-center gap-3">
+          <div class="p-2 rounded-lg bg-cyan-950 border border-cyan-500/40 text-cyan-400">
+            <i data-lucide="file-search" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>Deep Packet Inspection</span>
+              <span id="modalPacketId" class="text-xs px-2 py-0.5 rounded bg-slate-800 font-mono text-cyan-400">#0</span>
+            </h3>
+            <p class="text-xs text-slate-400" id="modalPacketSummary">IP Layer & C2 Heuristic Breakdown</p>
+          </div>
+        </div>
+        <button id="btnCloseModal" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="p-6 overflow-y-auto space-y-6 text-xs scrollbar-thin">
+        
+        <!-- Threat Risk Assessment Banner -->
+        <div id="modalThreatBanner" class="p-4 rounded-xl border flex items-start gap-4">
+          <div id="modalThreatIcon" class="mt-0.5"></div>
+          <div class="flex-1">
+            <div class="flex items-center justify-between">
+              <h4 id="modalThreatTitle" class="font-bold text-sm tracking-wide">Threat Score: 0/100</h4>
+              <span id="modalThreatBadge" class="px-2.5 py-0.5 rounded font-bold uppercase tracking-wider text-[10px]">BENIGN</span>
+            </div>
+            <ul id="modalThreatReasons" class="mt-2 space-y-1 list-disc list-inside text-slate-300">
+              <li>No malicious C2 patterns identified.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Protocol Layers Breakdown Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
+          <div class="bg-slate-900/90 p-3 rounded-lg border border-slate-800">
+            <span class="text-[10px] text-slate-500 block uppercase">Protocol</span>
+            <span id="modalProto" class="text-cyan-400 font-bold text-sm">TCP</span>
+          </div>
+          <div class="bg-slate-900/90 p-3 rounded-lg border border-slate-800">
+            <span class="text-[10px] text-slate-500 block uppercase">Length</span>
+            <span id="modalLength" class="text-white font-bold text-sm">64 bytes</span>
+          </div>
+          <div class="bg-slate-900/90 p-3 rounded-lg border border-slate-800">
+            <span class="text-[10px] text-slate-500 block uppercase">Flags</span>
+            <span id="modalFlags" class="text-white font-bold text-sm">PA</span>
+          </div>
+          <div class="bg-slate-900/90 p-3 rounded-lg border border-slate-800">
+            <span class="text-[10px] text-slate-500 block uppercase">Timestamp</span>
+            <span id="modalTime" class="text-slate-300 font-bold text-sm">12:00:00</span>
+          </div>
+        </div>
+
+        <!-- Source / Destination Endpoint Card -->
+        <div class="bg-slate-900/90 p-4 rounded-xl border border-slate-800 flex items-center justify-between font-mono">
+          <div>
+            <span class="text-[10px] uppercase tracking-wider text-slate-400 block">Source Endpoint</span>
+            <span id="modalSrc" class="text-sm font-bold text-emerald-400">192.168.1.100:54321</span>
+          </div>
+          <i data-lucide="arrow-right" class="w-5 h-5 text-slate-600"></i>
+          <div class="text-right">
+            <span class="text-[10px] uppercase tracking-wider text-slate-400 block">Destination Endpoint</span>
+            <span id="modalDst" class="text-sm font-bold text-rose-400">203.0.113.88:4444</span>
+          </div>
+        </div>
+
+        <!-- DNS Query Details (if DNS) -->
+        <div id="modalDnsSection" class="hidden bg-slate-900/90 p-4 rounded-xl border border-slate-800 space-y-2">
+          <span class="text-[10px] uppercase tracking-wider text-cyan-400 font-bold block">DNS Query Inspection</span>
+          <div class="font-mono text-slate-200 bg-slate-950 p-2.5 rounded border border-slate-800 break-all" id="modalDnsQuery">
+            test.query.com
+          </div>
+          <div class="flex gap-4 text-[11px] text-slate-400">
+            <span>Query Length: <b id="modalDnsLen" class="text-white">0</b></span>
+            <span>Calculated Shannon Entropy: <b id="modalDnsEntropy" class="text-amber-400">0.00</b> (Threshold: 3.6)</span>
+          </div>
+        </div>
+
+        <!-- Hex & ASCII Dump -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Payload Raw Preview (ASCII & Hex Dump)</span>
+            <span class="text-[10px] text-slate-500 font-mono" id="modalPayloadLen">0 bytes</span>
+          </div>
+          <div class="bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-[11px] space-y-2 overflow-x-auto">
+            <div>
+              <span class="text-slate-500 select-none block mb-1">ASCII:</span>
+              <pre class="text-slate-300 whitespace-pre-wrap break-all" id="modalAsciiDump">Empty Payload</pre>
+            </div>
+            <div class="border-t border-slate-850 pt-2">
+              <span class="text-slate-500 select-none block mb-1">HEX:</span>
+              <pre class="text-cyan-400 whitespace-pre-wrap break-all" id="modalHexDump"></pre>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="p-4 border-t border-slate-800 flex justify-end">
+        <button id="btnCloseModalBottom" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold transition">
+          Close Inspector
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCRIPTS -->
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>C2 Sentinel Popup</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="popup-container">
+    <!-- HEADER -->
+    <header class="header">
+      <div class="brand">
+        <div class="logo-shield">
+          <div class="shield-inner"></div>
+        </div>
+        <div>
+          <h1 class="title">C2 SENTINEL</h1>
+          <span class="subtitle">Threat Hunting & Monitor</span>
+        </div>
+      </div>
+      <div id="connBadge" class="conn-badge offline">
+        <span class="dot"></span>
+        <span id="connText">Checking...</span>
+      </div>
+    </header>
+
+    <!-- METRICS GRID -->
+    <section class="metrics-grid">
+      <div class="metric-card">
+        <span class="metric-label">PACKETS</span>
+        <span class="metric-val" id="valPackets">0</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">THROUGHPUT</span>
+        <span class="metric-val text-emerald" id="valPPS">0 <small>pps</small></span>
+      </div>
+      <div class="metric-card border-threat">
+        <span class="metric-label">C2 THREATS</span>
+        <span class="metric-val text-rose" id="valThreats">0</span>
+      </div>
+    </section>
+
+    <!-- STATUS INFO BAR -->
+    <div class="status-bar">
+      <span class="status-label">Engine Mode:</span>
+      <span id="engineMode" class="status-mode">IDLE / CONNECTING</span>
+    </div>
+
+    <!-- RECENT ALERTS SECTION -->
+    <section class="alerts-section">
+      <div class="section-header">
+        <span class="section-title">ACTIVE THREAT ALERTS</span>
+        <span id="alertCountBadge" class="badge-mini">0</span>
+      </div>
+      <div id="alertsList" class="alerts-list">
+        <div class="empty-alerts">
+          <div class="empty-icon">🛡️</div>
+          <div>No active threats detected. Network clean.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ACTION BUTTONS -->
+    <footer class="footer">
+      <button id="btnOpenDashboard" class="btn btn-primary">
+        <span>🚀 Open Full SOC Dashboard</span>
+      </button>
+      <button id="btnToggleSim" class="btn btn-secondary">
+        <span>⚡ Simulate C2 Attack</span>
+      </button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
