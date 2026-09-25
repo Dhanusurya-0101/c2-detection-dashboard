@@ -69,11 +69,14 @@ function triggerThreatNotification(pkt) {
     ? pkt.threat_reasons[0] 
     : "Potential C2 Beaconing or anomalous egress flow detected.";
 
+  const isBlocked = pkt.is_blocked;
   const notifOptions = {
     type: "basic",
     iconUrl: "icons/icon128.png",
-    title: `🚨 C2 Threat Alert [${pkt.threat_level}]`,
-    message: `${pkt.src_ip} ➔ ${pkt.dst_ip}:${pkt.dst_port}\n${reason}`,
+    title: isBlocked ? `🛡️ Auto-Quarantined [${pkt.threat_level}]` : `🚨 C2 Threat Alert [${pkt.threat_level}]`,
+    message: isBlocked 
+      ? `QUARANTINED: ${pkt.src_ip} ➔ ${pkt.dst_ip}:${pkt.dst_port}\n${reason}\n[Action: Firewall Rule Injected]`
+      : `${pkt.src_ip} ➔ ${pkt.dst_ip}:${pkt.dst_port}\n${reason}`,
     priority: 2,
     requireInteraction: false
   };

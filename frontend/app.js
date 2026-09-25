@@ -30,7 +30,7 @@ const ppsHistory = Array(30).fill(0);
 const ppsLabels = Array(30).fill('');
 
 // Quarantine & Blocker State
-let autoBlockEnabled = false;
+let autoBlockEnabled = true;
 let blockedIpsList = [];
 
 // DOM Elements
@@ -101,6 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
   lucide.createIcons();
   initCharts();
   loadInterfaces();
+  loadBlockedList();
   connectWebSocket();
   setupEventListeners();
   requestAnimationFrame(renderLoop);
@@ -305,23 +306,62 @@ function updateConnStatus(connected) {
 }
 
 // Quarantine and Blocker Controller
+// Toast Notification
+function showToast(msg) {
+  let toast = document.getElementById('c2Toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'c2Toast';
+    toast.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;background:#1e1b4b;border:1px solid #a855f7;color:#f3e8ff;padding:10px 18px;border-radius:10px;font-size:12px;font-weight:700;box-shadow:0 0 25px rgba(168,85,247,0.5);transition:opacity 0.3s ease;display:none;pointer-events:none;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.display = 'block';
+  toast.style.opacity = '1';
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => { toast.style.display = 'none'; }, 300);
+  }, 3500);
+}
+
+// Quarantine and Blocker Controller
 function updateAutoBlockUI(enabled) {
-  autoBlockEnabled = enabled;
-  if (enabled) {
-    btnToggleAutoBlock.classList.add('auto-block-active');
-    autoBlockBtnText.textContent = 'AUTO-BLOCK: ON';
-    autoBlockBtnText.className = 'text-purple-300 font-bold';
-    autoBlockIcon.className = 'w-4 h-4 text-purple-400';
+  autoBlockEnabled = !!enabled;
+  if (!btnToggleAutoBlock) return;
+  if (autoBlockEnabled) {
+    btnToggleAutoBlock.className = 'flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all duration-200 bg-purple-950 border border-purple-500 text-purple-200 shadow-[0_0_15px_rgba(168,85,247,0.4)]';
+    btnToggleAutoBlock.innerHTML = `<i data-lucide="shield-alert" class="w-4 h-4 text-purple-400"></i><span class="font-bold">AUTO-BLOCK: ACTIVE</span>`;
   } else {
-    btnToggleAutoBlock.classList.remove('auto-block-active');
-    autoBlockBtnText.textContent = 'AUTO-BLOCK: OFF';
-    autoBlockBtnText.className = 'text-slate-400';
-    autoBlockIcon.className = 'w-4 h-4 text-emerald-400';
+    btnToggleAutoBlock.className = 'flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all duration-200 bg-slate-900 border border-slate-700/80 text-slate-400 hover:text-white';
+    btnToggleAutoBlock.innerHTML = `<i data-lucide="shield-check" class="w-4 h-4 text-emerald-400"></i><span>AUTO-BLOCK: OFF</span>`;
+  }
+  lucide.createIcons({ root: btnToggleAutoBlock });
+}
+
+async function loadBlockedList() {
+  try {
+    const res = await fetch(`${API_BASE}/api/blocked`);
+    if (res.ok) {
+      const data = await res.json();
+      blockedIpsList = data.blocked || [];
+      renderQuarantineList(blockedIpsList);
+      updateAutoBlockUI(data.auto_block);
+      if (statAdminStatus) {
+        statAdminStatus.textContent = data.is_admin ? "Kernel Firewall Active" : "Software IPS Active";
+      }
+    }
+  } catch (err) {
+    console.warn('Could not load blocked list:', err);
   }
 }
 
-async function blockIP(ip, reason) {
+async function blockIP(ip, reason, clickedBtn) {
   if (!ip) return;
+  if (clickedBtn) {
+    clickedBtn.textContent = 'Blocking...';
+    clickedBtn.disabled = true;
+  }
   try {
     const res = await fetch(`${API_BASE}/api/block`, {
       method: 'POST',
@@ -334,12 +374,29 @@ async function blockIP(ip, reason) {
         blockedIpsList.push(data.record);
         renderQuarantineList(blockedIpsList);
       }
+      // Update all threat buttons for this IP
+      document.querySelectorAll(`.btn-block-threat[data-ip="${ip}"]`).forEach(btn => {
+        const parent = btn.parentElement;
+        if (parent) {
+          parent.innerHTML = `<span class="px-2 py-0.5 rounded text-[10px] font-bold badge-blocked inline-flex items-center gap-1"><i data-lucide="shield-ban" class="w-3 h-3"></i>QUARANTINED</span>`;
+          lucide.createIcons({ root: parent });
+        }
+      });
       refilterTable();
+      showToast(`🛡️ IP ${ip} Quarantined!`);
     } else {
+      if (clickedBtn) {
+        clickedBtn.textContent = 'BLOCK IP';
+        clickedBtn.disabled = false;
+      }
       alert(`Could not block ${ip}: ` + (data.error || 'Unknown error'));
     }
   } catch (err) {
     console.error('Failed to block IP:', err);
+    if (clickedBtn) {
+      clickedBtn.textContent = 'BLOCK IP';
+      clickedBtn.disabled = false;
+    }
   }
 }
 
@@ -356,6 +413,7 @@ async function unblockIP(ip) {
       blockedIpsList = blockedIpsList.filter(b => b.ip !== ip);
       renderQuarantineList(blockedIpsList);
       refilterTable();
+      showToast(`🔓 Restored connection to ${ip}`);
     }
   } catch (err) {
     console.error('Failed to unblock IP:', err);
@@ -434,6 +492,16 @@ function handleServerMessage(msg) {
       if (!blockedIpsList.some(b => b.ip === msg.record.ip)) {
         blockedIpsList.push(msg.record);
         renderQuarantineList(blockedIpsList);
+      }
+      document.querySelectorAll(`.btn-block-threat[data-ip="${msg.record.ip}"]`).forEach(btn => {
+        const parent = btn.parentElement;
+        if (parent) {
+          parent.innerHTML = `<span class="px-2 py-0.5 rounded text-[10px] font-bold badge-blocked inline-flex items-center gap-1"><i data-lucide="shield-ban" class="w-3 h-3"></i>QUARANTINED</span>`;
+          lucide.createIcons({ root: parent });
+        }
+      });
+      if (msg.auto_triggered) {
+        showToast(`⚡ AUTO-BLOCKED: Malicious IP ${msg.record.ip} quarantined!`);
       }
     } else if (msg.action === 'unblocked' && msg.ip) {
       blockedIpsList = blockedIpsList.filter(b => b.ip !== msg.ip);
@@ -718,7 +786,7 @@ function addThreatAlert(pkt) {
       e.stopPropagation();
       const ip = blockBtn.dataset.ip;
       const reason = blockBtn.dataset.reason;
-      blockIP(ip, reason);
+      blockIP(ip, reason, blockBtn);
     });
   }
 
@@ -901,8 +969,9 @@ function setupEventListeners() {
         const res = await fetch(`${API_BASE}/api/autoblock/toggle`, { method: 'POST' });
         const data = await res.json();
         updateAutoBlockUI(data.auto_block);
+        showToast(data.auto_block ? '🛡️ Auto-Block ACTIVE: Critical threats will be blocked automatically!' : '⚠️ Auto-Block DISABLED.');
       } catch (err) {
-        alert('Failed to toggle auto-block: ' + err.message);
+        showToast('Failed to toggle auto-block: ' + err.message);
       }
     });
   }

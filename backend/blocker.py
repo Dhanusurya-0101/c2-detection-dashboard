@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 class C2Blocker:
     def __init__(self):
         self.blocked_ips: Dict[str, dict] = {}
-        self.auto_block_enabled = False
+        self.auto_block_enabled = True
         self.is_admin = self._check_admin()
 
     @staticmethod
@@ -20,8 +20,11 @@ class C2Blocker:
             return False
 
     def is_safe_ip(self, ip: str) -> bool:
-        """Ensures we never accidentally block localhost or local gateways."""
+        """Ensures we never accidentally block localhost, local gateways, or essential DNS."""
         if not ip or ip in ("127.0.0.1", "0.0.0.0", "localhost", "::1"):
+            return False
+        # Do not block essential DNS resolvers to keep host Internet working
+        if ip in ("8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9"):
             return False
         try:
             ip_obj = ipaddress.ip_address(ip)

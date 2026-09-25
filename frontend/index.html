@@ -10,7 +10,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=2.6" />
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -76,9 +76,9 @@
       </button>
 
       <!-- Auto-Block Toggle Button -->
-      <button id="btnToggleAutoBlock" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all duration-200 bg-slate-900 border border-slate-700/80 text-slate-400 hover:text-white" title="Auto-quarantine Critical C2 Threat IPs via Windows Firewall">
-        <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400" id="autoBlockIcon"></i>
-        <span id="autoBlockBtnText">AUTO-BLOCK: OFF</span>
+      <button id="btnToggleAutoBlock" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all duration-200 bg-purple-950 border border-purple-500 text-purple-200 shadow-[0_0_15px_rgba(168,85,247,0.4)]" title="Auto-quarantine Critical C2 Threat IPs via Windows Firewall">
+        <i data-lucide="shield-alert" class="w-4 h-4 text-purple-400" id="autoBlockIcon"></i>
+        <span id="autoBlockBtnText" class="font-bold">AUTO-BLOCK: ACTIVE</span>
       </button>
 
       <!-- Clear Data -->
@@ -459,6 +459,6 @@
   </div>
 
   <!-- SCRIPTS -->
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=2.6"></script>
 </body>
 </html>

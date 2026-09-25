@@ -67,30 +67,39 @@ def broadcast_packet_sync(packet_data: dict):
     else:
         stats["protocols"]["OTHER"] += 1
 
-    # Threat metrics
+    # Threat metrics & Active Auto-Block Remediation
     sev = packet_data.get("threat_level", "INFO")
     if sev in ("CRITICAL", "HIGH", "MEDIUM"):
         stats["threats_count"] += 1
         if sev == "CRITICAL":
             stats["critical_count"] += 1
-            # Auto-block trigger if enabled
-            if blocker.auto_block_enabled and not is_blocked and blocker.is_safe_ip(dst_ip):
-                first_reason = packet_data.get("threat_reasons", ["Critical C2 Threat"])[0]
-                block_res = blocker.block_ip(dst_ip, reason=f"Auto-Block: {first_reason}", trigger_type="AUTO")
+        elif sev == "HIGH":
+            stats["high_count"] += 1
+        elif sev == "MEDIUM":
+            stats["medium_count"] += 1
+
+        # Real-time Auto-Block for actionable C2 threats without waiting for manual action
+        if blocker.auto_block_enabled and sev in ("CRITICAL", "HIGH"):
+            target_ip = dst_ip if blocker.is_safe_ip(dst_ip) else (src_ip if blocker.is_safe_ip(src_ip) else None)
+            if target_ip and not blocker.is_blocked(target_ip):
+                first_reason = packet_data.get("threat_reasons", [f"Automated {sev} C2 Threat"])[0]
+                block_res = blocker.block_ip(
+                    target_ip,
+                    reason=f"Auto-Block ({sev}): {first_reason}",
+                    trigger_type="AUTO"
+                )
                 packet_data["is_blocked"] = True
+                is_blocked = True
                 if active_connections and loop and loop.is_running():
                     asyncio.run_coroutine_threadsafe(
                         _broadcast_message({
                             "type": "block_event",
                             "action": "blocked",
                             "record": block_res.get("record"),
-                            "blocked_count": len(blocker.blocked_ips)
+                            "blocked_count": len(blocker.blocked_ips),
+                            "auto_triggered": True
                         }), loop
                     )
-        elif sev == "HIGH":
-            stats["high_count"] += 1
-        elif sev == "MEDIUM":
-            stats["medium_count"] += 1
 
     stats["active_flows"] = len(detector.flows)
     recent_packets.append(packet_data)
@@ -118,7 +127,7 @@ async def _broadcast_message(msg: dict):
     disconnected = set()
     for ws in list(active_connections):
         try:
-            await ws.send_json(msg)
+            await asyncio.wait_for(ws.send_json(msg), timeout=1.5)
         except Exception:
             disconnected.add(ws)
     for ws in disconnected:
@@ -176,8 +185,10 @@ async def websocket_endpoint(websocket: WebSocket):
             "is_admin": blocker.is_admin
         })
         while True:
-            # Keep receiving client commands
+            # Keep receiving client commands or heartbeat pings
             data = await websocket.receive_text()
+            if "ping" in data:
+                await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:
         active_connections.discard(websocket)
     except Exception:
