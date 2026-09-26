@@ -134,6 +134,7 @@ class TrafficSimulator:
 
             # Emit parsed packets
             for p in packets_to_emit:
+                p["simulated"] = True
                 self.sim_count += 1
                 severity, score, reasons = self.detector.analyze_packet(p)
                 p["threat_level"] = severity

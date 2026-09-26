@@ -81,6 +81,12 @@
         <span id="autoBlockBtnText" class="font-bold">AUTO-BLOCK: ACTIVE</span>
       </button>
 
+      <!-- Simulation / Real Enforcement Mode Toggle Button -->
+      <button id="btnToggleSimMode" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all duration-200 bg-slate-900 border border-slate-700/80 text-slate-300 hover:border-cyan-500" title="Toggle between Real Windows Firewall and Simulation Mode">
+        <i data-lucide="shield" class="w-4 h-4 text-cyan-400" id="simModeIcon"></i>
+        <span id="simModeBtnText" class="font-bold">MODE: REAL FIREWALL</span>
+      </button>
+
       <!-- Clear Data -->
       <button id="btnClear" class="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition" title="Clear Traffic History">
         <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -250,7 +256,12 @@
             <i data-lucide="shield-x" class="w-4 h-4 text-purple-400"></i>
             <h2 class="font-bold text-sm tracking-wide text-white">QUARANTINE / IPS</h2>
           </div>
-          <span class="text-xs text-purple-400 font-mono" id="quarantineCountBadge">0 blocked</span>
+          <div class="flex items-center gap-2">
+            <button id="btnSyncFirewall" class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-cyan-400 transition" title="Sync with Windows Firewall">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+            </button>
+            <span class="text-xs text-purple-400 font-mono" id="quarantineCountBadge">0 blocked</span>
+          </div>
         </div>
 
         <div id="quarantineContainer" class="space-y-2 overflow-y-auto max-h-[220px] pr-1 scrollbar-thin">

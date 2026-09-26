@@ -216,3 +216,46 @@ body {
   color: #ffffff;
 }
 
+/* Quarantine State Badges */
+.badge-enforced {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.6);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.badge-simulated {
+  background-color: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.6);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.badge-failed {
+  background-color: rgba(244, 63, 94, 0.2);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.6);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.btn-retry {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  color: #fbbf24;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-retry:hover {
+  background: #d97706;
+  color: #ffffff;
+}
+
+

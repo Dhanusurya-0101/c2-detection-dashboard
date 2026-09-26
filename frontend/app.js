@@ -31,7 +31,9 @@ const ppsLabels = Array(30).fill('');
 
 // Quarantine & Blocker State
 let autoBlockEnabled = true;
+let isSimulationMode = false;
 let blockedIpsList = [];
+let failedBlocksMap = {}; // ip -> error string
 
 // DOM Elements
 const statTotalPackets = document.getElementById('statTotalPackets');
@@ -63,6 +65,10 @@ const btnToggleSim = document.getElementById('btnToggleSim');
 const btnToggleAutoBlock = document.getElementById('btnToggleAutoBlock');
 const autoBlockBtnText = document.getElementById('autoBlockBtnText');
 const autoBlockIcon = document.getElementById('autoBlockIcon');
+const btnToggleSimMode = document.getElementById('btnToggleSimMode');
+const simModeBtnText = document.getElementById('simModeBtnText');
+const simModeIcon = document.getElementById('simModeIcon');
+const btnSyncFirewall = document.getElementById('btnSyncFirewall');
 const btnClear = document.getElementById('btnClear');
 const btnPauseStream = document.getElementById('btnPauseStream');
 const pauseIcon = document.getElementById('pauseIcon');
@@ -266,6 +272,12 @@ function startFallbackPolling() {
       if (res.ok) {
         const data = await res.json();
         updateStatsUI(data.stats);
+        if (data.blocked_ips) {
+          blockedIpsList = data.blocked_ips;
+          renderQuarantineList(blockedIpsList, data.active_blocked_count);
+        } else if (typeof data.active_blocked_count === 'number') {
+          updateBlockedCountUI(data.active_blocked_count);
+        }
         if (data.packets && data.packets.length > 0) {
           data.packets.forEach((p) => {
             if (!packetHistory.some((existing) => existing.id === p.id)) {
@@ -339,16 +351,52 @@ function updateAutoBlockUI(enabled) {
   lucide.createIcons({ root: btnToggleAutoBlock });
 }
 
+function updateSimModeUI(enabled) {
+  isSimulationMode = !!enabled;
+  if (!btnToggleSimMode || !simModeBtnText) return;
+  if (isSimulationMode) {
+    btnToggleSimMode.className = 'flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all duration-200 bg-sky-950/80 border border-sky-500 text-sky-200 shadow-[0_0_15px_rgba(56,189,248,0.3)]';
+    simModeBtnText.textContent = 'MODE: SIMULATION';
+    if (simModeIcon) simModeIcon.className = 'w-4 h-4 text-sky-400';
+  } else {
+    btnToggleSimMode.className = 'flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all duration-200 bg-slate-900 border border-slate-700/80 text-slate-300 hover:border-cyan-500';
+    simModeBtnText.textContent = 'MODE: REAL FIREWALL';
+    if (simModeIcon) simModeIcon.className = 'w-4 h-4 text-cyan-400';
+  }
+  lucide.createIcons({ root: btnToggleSimMode });
+}
+
+async function toggleSimulationMode() {
+  try {
+    const res = await fetch(`${API_BASE}/api/simulation/toggle`, { method: 'POST' });
+    const data = await res.json();
+    updateSimModeUI(data.simulation_mode);
+    showToast(`⚙️ Mode: ${data.simulation_mode ? 'Simulation Mode Active' : 'Real Windows Firewall Active'}`);
+  } catch (err) {
+    console.error('Failed to toggle simulation mode:', err);
+  }
+}
+
 async function loadBlockedList() {
   try {
     const res = await fetch(`${API_BASE}/api/blocked`);
     if (res.ok) {
       const data = await res.json();
-      blockedIpsList = data.blocked || [];
-      renderQuarantineList(blockedIpsList);
+      blockedIpsList = data.blocked_ips || data.blocked || [];
+      const activeCount = typeof data.active_blocked_count === 'number'
+        ? data.active_blocked_count
+        : (typeof data.count === 'number' ? data.count : blockedIpsList.length);
+      renderQuarantineList(blockedIpsList, activeCount);
+      updateBlockedCountUI(activeCount);
       updateAutoBlockUI(data.auto_block);
+      updateSimModeUI(data.simulation_mode);
+      if (data.failed && Array.isArray(data.failed)) {
+        data.failed.forEach(f => {
+          if (f.ip && f.error) failedBlocksMap[f.ip] = f.error;
+        });
+      }
       if (statAdminStatus) {
-        statAdminStatus.textContent = data.is_admin ? "Kernel Firewall Active" : "Software IPS Active";
+        statAdminStatus.textContent = data.is_admin ? "Kernel Firewall Active" : "Software / Sim Active";
       }
     }
   } catch (err) {
@@ -356,7 +404,50 @@ async function loadBlockedList() {
   }
 }
 
-async function blockIP(ip, reason, clickedBtn) {
+function updateThreatCardActions(ip, status, errorMsg) {
+  document.querySelectorAll(`.threat-card-actions[data-ip="${ip}"]`).forEach(container => {
+    if (status === 'ENFORCED') {
+      container.innerHTML = `<span class="px-2 py-0.5 rounded text-[10px] font-bold badge-enforced inline-flex items-center gap-1"><i data-lucide="shield-ban" class="w-3 h-3"></i>ENFORCED</span>`;
+    } else if (status === 'SIMULATED') {
+      container.innerHTML = `<span class="px-2 py-0.5 rounded text-[10px] font-bold badge-simulated inline-flex items-center gap-1"><i data-lucide="shield" class="w-3 h-3"></i>SIMULATED</span>`;
+    } else if (status === 'FAILED') {
+      container.innerHTML = `
+        <div class="flex items-center gap-1.5">
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold badge-failed cursor-help" title="${escapeHtml(errorMsg || 'Action failed')}">BLOCK FAILED</span>
+          <button class="btn-retry" data-ip="${escapeHtml(ip)}" title="Retry blocking this IP">Retry</button>
+        </div>
+      `;
+      const retryBtn = container.querySelector('.btn-retry');
+      if (retryBtn) {
+        retryBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const card = container.closest('.threat-alert-card');
+          const reason = card ? card.dataset.reason : 'Manual Block Retry';
+          blockIP(ip, reason, retryBtn);
+        });
+      }
+    } else {
+      container.innerHTML = `
+        <button class="btn-block-threat" data-ip="${escapeHtml(ip)}" title="Block IP via Windows Firewall">
+          <i data-lucide="shield-x" class="w-3 h-3"></i>
+          <span>BLOCK IP</span>
+        </button>
+      `;
+      const blkBtn = container.querySelector('.btn-block-threat');
+      if (blkBtn) {
+        blkBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const card = container.closest('.threat-alert-card');
+          const reason = card ? card.dataset.reason : 'Manual Dashboard Block';
+          blockIP(ip, reason, blkBtn);
+        });
+      }
+    }
+    lucide.createIcons({ root: container });
+  });
+}
+
+async function blockIP(ip, reason, clickedBtn, forceSimulation = false) {
   if (!ip) return;
   if (clickedBtn) {
     clickedBtn.textContent = 'Blocking...';
@@ -366,37 +457,55 @@ async function blockIP(ip, reason, clickedBtn) {
     const res = await fetch(`${API_BASE}/api/block`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip, reason: reason || 'Manual Dashboard Block' })
+      body: JSON.stringify({
+        ip,
+        reason: reason || 'Manual Dashboard Block',
+        force_simulation: forceSimulation || isSimulationMode
+      })
     });
     const data = await res.json();
-    if (data.success) {
-      if (!blockedIpsList.some(b => b.ip === ip)) {
-        blockedIpsList.push(data.record);
-        renderQuarantineList(blockedIpsList);
-      }
-      // Update all threat buttons for this IP
-      document.querySelectorAll(`.btn-block-threat[data-ip="${ip}"]`).forEach(btn => {
-        const parent = btn.parentElement;
-        if (parent) {
-          parent.innerHTML = `<span class="px-2 py-0.5 rounded text-[10px] font-bold badge-blocked inline-flex items-center gap-1"><i data-lucide="shield-ban" class="w-3 h-3"></i>QUARANTINED</span>`;
-          lucide.createIcons({ root: parent });
+    if (data.success && data.record) {
+      const targetIp = data.record.ip || ip;
+      if (failedBlocksMap[targetIp]) delete failedBlocksMap[targetIp];
+      if (Array.isArray(data.blocked_ips)) {
+        blockedIpsList = data.blocked_ips;
+      } else {
+        const existingIdx = blockedIpsList.findIndex(b => b.ip === targetIp);
+        if (existingIdx >= 0) {
+          blockedIpsList[existingIdx] = data.record;
+        } else {
+          blockedIpsList.push(data.record);
         }
-      });
+      }
+      const activeCount = typeof data.active_blocked_count === 'number'
+        ? data.active_blocked_count
+        : blockedIpsList.length;
+      renderQuarantineList(blockedIpsList, activeCount);
+      updateBlockedCountUI(activeCount);
+      updateThreatCardActions(targetIp, data.record.status === 'SIMULATED' ? 'SIMULATED' : 'ENFORCED');
       refilterTable();
-      showToast(`🛡️ IP ${ip} Quarantined!`);
+      showToast(`🛡️ IP ${targetIp} Quarantined! (${data.record.status})`);
     } else {
+      const err = data.error || 'Unknown error occurred.';
+      failedBlocksMap[ip] = err;
+      updateThreatCardActions(ip, 'FAILED', err);
       if (clickedBtn) {
-        clickedBtn.textContent = 'BLOCK IP';
         clickedBtn.disabled = false;
       }
-      alert(`Could not block ${ip}: ` + (data.error || 'Unknown error'));
+      if (data.requires_elevation || data.code === 'ELEVATION_REQUIRED') {
+        showToast(`❌ Non-Admin: Run Python as Admin or switch to Simulation Mode.`);
+      } else {
+        showToast(`❌ Block Failed: ${err}`);
+      }
     }
   } catch (err) {
     console.error('Failed to block IP:', err);
+    failedBlocksMap[ip] = String(err);
+    updateThreatCardActions(ip, 'FAILED', String(err));
     if (clickedBtn) {
-      clickedBtn.textContent = 'BLOCK IP';
       clickedBtn.disabled = false;
     }
+    showToast(`❌ Network error while blocking ${ip}`);
   }
 }
 
@@ -410,38 +519,72 @@ async function unblockIP(ip) {
     });
     const data = await res.json();
     if (data.success) {
-      blockedIpsList = blockedIpsList.filter(b => b.ip !== ip);
-      renderQuarantineList(blockedIpsList);
+      if (Array.isArray(data.blocked_ips)) {
+        blockedIpsList = data.blocked_ips;
+      } else {
+        blockedIpsList = blockedIpsList.filter(b => b.ip !== ip);
+      }
+      if (failedBlocksMap[ip]) delete failedBlocksMap[ip];
+      const activeCount = typeof data.active_blocked_count === 'number'
+        ? data.active_blocked_count
+        : blockedIpsList.length;
+      renderQuarantineList(blockedIpsList, activeCount);
+      updateBlockedCountUI(activeCount);
+      updateThreatCardActions(ip, 'UNBLOCKED');
       refilterTable();
       showToast(`🔓 Restored connection to ${ip}`);
+    } else {
+      showToast(`❌ Unblock Failed: ${data.error || 'Error'}`);
     }
   } catch (err) {
     console.error('Failed to unblock IP:', err);
+    showToast(`❌ Network error while unblocking ${ip}`);
   }
 }
 
-function renderQuarantineList(list) {
+function updateBlockedCountUI(count) {
+  const num = (typeof count === 'number' && !isNaN(count))
+    ? count
+    : (Array.isArray(blockedIpsList) ? blockedIpsList.length : 0);
+  if (quarantineCountBadge) {
+    quarantineCountBadge.textContent = `${num} blocked`;
+  }
+  if (statBlocked) {
+    statBlocked.textContent = String(num);
+  }
+}
+
+function renderQuarantineList(list, activeCount) {
   if (!quarantineContainer) return;
+  const countToDisplay = (typeof activeCount === 'number' && !isNaN(activeCount))
+    ? activeCount
+    : (Array.isArray(list) ? list.length : 0);
+  updateBlockedCountUI(countToDisplay);
+
   if (!list || list.length === 0) {
     if (quarantineEmpty) quarantineEmpty.style.display = 'block';
     quarantineContainer.innerHTML = '';
     quarantineContainer.appendChild(quarantineEmpty);
-    if (quarantineCountBadge) quarantineCountBadge.textContent = '0 blocked';
-    if (statBlocked) statBlocked.textContent = '0';
     return;
   }
 
   if (quarantineEmpty) quarantineEmpty.style.display = 'none';
   quarantineContainer.innerHTML = '';
-  if (quarantineCountBadge) quarantineCountBadge.textContent = `${list.length} blocked`;
-  if (statBlocked) statBlocked.textContent = list.length;
 
   list.forEach(item => {
     const card = document.createElement('div');
     card.className = 'quarantine-card';
+    const isSim = item.status === 'SIMULATED';
+    const statusBadge = isSim
+      ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold badge-simulated">SIM</span>`
+      : `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold badge-enforced">ENFORCED</span>`;
+
     card.innerHTML = `
       <div class="truncate max-w-[130px]">
-        <div class="font-bold text-purple-300 truncate" title="${escapeHtml(item.ip)}">${escapeHtml(item.ip)}</div>
+        <div class="flex items-center gap-1.5">
+          <span class="font-bold text-purple-300 truncate" title="${escapeHtml(item.ip)}">${escapeHtml(item.ip)}</span>
+          ${statusBadge}
+        </div>
         <div class="text-[9px] text-slate-500 truncate" title="${escapeHtml(item.reason)}">${escapeHtml(item.reason)}</div>
       </div>
       <div class="flex items-center gap-1.5">
@@ -469,14 +612,24 @@ function handleServerMessage(msg) {
     updateSimButtonUI();
     updateStatsUI(msg.stats);
     
-    // Initialize Quarantine and Auto-block state
+    // Initialize Quarantine, Simulation Mode and Auto-block state
     if (msg.auto_block !== undefined) updateAutoBlockUI(msg.auto_block);
-    if (msg.blocked_ips) {
-      blockedIpsList = msg.blocked_ips;
-      renderQuarantineList(blockedIpsList);
+    if (msg.simulation_mode !== undefined) updateSimModeUI(msg.simulation_mode);
+    const initialList = msg.blocked_ips || msg.blocked || [];
+    blockedIpsList = initialList;
+    const initialCount = typeof msg.active_blocked_count === 'number'
+      ? msg.active_blocked_count
+      : (typeof msg.blocked_count === 'number' ? msg.blocked_count : initialList.length);
+    renderQuarantineList(blockedIpsList, initialCount);
+    updateBlockedCountUI(initialCount);
+
+    if (msg.failed_blocks && Array.isArray(msg.failed_blocks)) {
+      msg.failed_blocks.forEach(f => {
+        if (f.ip && f.error) failedBlocksMap[f.ip] = f.error;
+      });
     }
     if (statAdminStatus) {
-      statAdminStatus.textContent = msg.is_admin ? "Kernel Firewall Active" : "Software IPS Active";
+      statAdminStatus.textContent = msg.is_admin ? "Kernel Firewall Active" : "Software / Sim Active";
     }
 
     if (msg.recent_packets && Array.isArray(msg.recent_packets)) {
@@ -489,27 +642,64 @@ function handleServerMessage(msg) {
     }
   } else if (msg.type === 'block_event') {
     if (msg.action === 'blocked' && msg.record) {
-      if (!blockedIpsList.some(b => b.ip === msg.record.ip)) {
+      if (failedBlocksMap[msg.record.ip]) delete failedBlocksMap[msg.record.ip];
+      const existingIdx = blockedIpsList.findIndex(b => b.ip === msg.record.ip);
+      if (existingIdx >= 0) {
+        blockedIpsList[existingIdx] = msg.record;
+      } else {
         blockedIpsList.push(msg.record);
-        renderQuarantineList(blockedIpsList);
       }
-      document.querySelectorAll(`.btn-block-threat[data-ip="${msg.record.ip}"]`).forEach(btn => {
-        const parent = btn.parentElement;
-        if (parent) {
-          parent.innerHTML = `<span class="px-2 py-0.5 rounded text-[10px] font-bold badge-blocked inline-flex items-center gap-1"><i data-lucide="shield-ban" class="w-3 h-3"></i>QUARANTINED</span>`;
-          lucide.createIcons({ root: parent });
-        }
-      });
+      const activeCount = typeof msg.active_blocked_count === 'number'
+        ? msg.active_blocked_count
+        : (typeof msg.blocked_count === 'number' ? msg.blocked_count : blockedIpsList.length);
+      renderQuarantineList(blockedIpsList, activeCount);
+      updateBlockedCountUI(activeCount);
+      updateThreatCardActions(msg.record.ip, msg.record.status === 'SIMULATED' ? 'SIMULATED' : 'ENFORCED');
       if (msg.auto_triggered) {
         showToast(`⚡ AUTO-BLOCKED: Malicious IP ${msg.record.ip} quarantined!`);
       }
+    } else if (msg.action === 'block_failed') {
+      const targetIp = msg.ip || (msg.record && msg.record.ip);
+      if (targetIp) {
+        failedBlocksMap[targetIp] = msg.error || 'Block failed';
+        updateThreatCardActions(targetIp, 'FAILED', msg.error);
+        if (msg.auto_triggered) {
+          showToast(`⚠️ Auto-block failed for ${targetIp}: ${msg.error}`);
+        }
+      }
+      if (typeof msg.active_blocked_count === 'number') {
+        updateBlockedCountUI(msg.active_blocked_count);
+      }
     } else if (msg.action === 'unblocked' && msg.ip) {
       blockedIpsList = blockedIpsList.filter(b => b.ip !== msg.ip);
-      renderQuarantineList(blockedIpsList);
+      if (failedBlocksMap[msg.ip]) delete failedBlocksMap[msg.ip];
+      const activeCount = typeof msg.active_blocked_count === 'number'
+        ? msg.active_blocked_count
+        : (typeof msg.blocked_count === 'number' ? msg.blocked_count : blockedIpsList.length);
+      renderQuarantineList(blockedIpsList, activeCount);
+      updateBlockedCountUI(activeCount);
+      updateThreatCardActions(msg.ip, 'UNBLOCKED');
     }
     refilterTable();
   } else if (msg.type === 'autoblock_toggle') {
     updateAutoBlockUI(msg.auto_block);
+  } else if (msg.type === 'simulation_toggle') {
+    updateSimModeUI(msg.simulation_mode);
+    if (msg.blocked_ips) {
+      blockedIpsList = msg.blocked_ips;
+      renderQuarantineList(blockedIpsList, msg.active_blocked_count);
+    } else if (typeof msg.active_blocked_count === 'number') {
+      updateBlockedCountUI(msg.active_blocked_count);
+    }
+  } else if (msg.type === 'firewall_synced') {
+    const list = msg.blocked_ips || msg.blocked || [];
+    blockedIpsList = list;
+    const activeCount = typeof msg.active_blocked_count === 'number'
+      ? msg.active_blocked_count
+      : (typeof msg.count === 'number' ? msg.count : list.length);
+    renderQuarantineList(blockedIpsList, activeCount);
+    updateBlockedCountUI(activeCount);
+    refilterTable();
   } else if (msg.type === 'packet') {
     if (!isPaused) {
       packetQueue.push(msg.data);
@@ -738,7 +928,7 @@ function addThreatAlert(pkt) {
   const isCrit = pkt.threat_level === 'CRITICAL';
   const isHigh = pkt.threat_level === 'HIGH';
 
-  card.className = `p-3 rounded-xl border text-xs transition duration-200 cursor-pointer ${
+  card.className = `threat-alert-card p-3 rounded-xl border text-xs transition duration-200 cursor-pointer ${
     isCrit
       ? 'bg-rose-950/20 border-rose-500/40 hover:border-rose-400'
       : isHigh
@@ -750,8 +940,25 @@ function addThreatAlert(pkt) {
     .map((r) => `<li class="text-slate-300 font-sans">${escapeHtml(r)}</li>`)
     .join('');
 
-  const isBlocked = blockedIpsList && blockedIpsList.some(b => b.ip === pkt.dst_ip);
   const firstReason = (pkt.threat_reasons && pkt.threat_reasons[0]) || 'Malicious C2 Threat';
+  card.dataset.reason = firstReason;
+  card.dataset.targetIp = pkt.dst_ip;
+
+  const blockedItem = blockedIpsList && blockedIpsList.find(b => b.ip === pkt.dst_ip);
+  const isFailed = failedBlocksMap[pkt.dst_ip];
+
+  let actionHtml = '';
+  if (blockedItem) {
+    if (blockedItem.status === 'SIMULATED') {
+      actionHtml = `<span class="px-2 py-0.5 rounded text-[10px] font-bold badge-simulated inline-flex items-center gap-1"><i data-lucide="shield" class="w-3 h-3"></i>SIMULATED</span>`;
+    } else {
+      actionHtml = `<span class="px-2 py-0.5 rounded text-[10px] font-bold badge-enforced inline-flex items-center gap-1"><i data-lucide="shield-ban" class="w-3 h-3"></i>ENFORCED</span>`;
+    }
+  } else if (isFailed) {
+    actionHtml = `<div class="flex items-center gap-1.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold badge-failed cursor-help" title="${escapeHtml(isFailed)}">BLOCK FAILED</span><button class="btn-retry" data-ip="${escapeHtml(pkt.dst_ip)}" title="Retry blocking this IP">Retry</button></div>`;
+  } else {
+    actionHtml = `<button class="btn-block-threat" data-ip="${escapeHtml(pkt.dst_ip)}" title="Block IP via Windows Firewall"><i data-lucide="shield-x" class="w-3 h-3"></i><span>BLOCK IP</span></button>`;
+  }
 
   card.innerHTML = `
     <div class="flex items-start justify-between gap-2">
@@ -769,13 +976,12 @@ function addThreatAlert(pkt) {
     </ul>
     <div class="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between">
       <span class="text-[10px] text-slate-500 font-mono">Target: ${pkt.dst_ip}</span>
-      ${isBlocked 
-        ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold badge-blocked">QUARANTINED</span>'
-        : `<button class="btn-block-threat" data-ip="${pkt.dst_ip}" data-reason="${escapeHtml(firstReason)}" title="Block IP via Windows Firewall">
-            <i data-lucide="shield-x" class="w-3 h-3"></i>
-            <span>BLOCK IP</span>
-          </button>`
-      }
+      <div class="flex items-center gap-2">
+        <button class="btn-inspect-alert px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold" title="Inspect Deep Packet Details">Details</button>
+        <div class="threat-card-actions" data-ip="${escapeHtml(pkt.dst_ip)}">
+          ${actionHtml}
+        </div>
+      </div>
     </div>
   `;
 
@@ -784,9 +990,25 @@ function addThreatAlert(pkt) {
   if (blockBtn) {
     blockBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const ip = blockBtn.dataset.ip;
-      const reason = blockBtn.dataset.reason;
-      blockIP(ip, reason, blockBtn);
+      blockIP(pkt.dst_ip, firstReason, blockBtn);
+    });
+  }
+
+  // Retry button handler
+  const retryBtn = card.querySelector('.btn-retry');
+  if (retryBtn) {
+    retryBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      blockIP(pkt.dst_ip, firstReason, retryBtn);
+    });
+  }
+
+  // Inspect Details button handler
+  const inspectBtn = card.querySelector('.btn-inspect-alert');
+  if (inspectBtn) {
+    inspectBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openInspector(pkt);
     });
   }
 
@@ -972,6 +1194,29 @@ function setupEventListeners() {
         showToast(data.auto_block ? '🛡️ Auto-Block ACTIVE: Critical threats will be blocked automatically!' : '⚠️ Auto-Block DISABLED.');
       } catch (err) {
         showToast('Failed to toggle auto-block: ' + err.message);
+      }
+    });
+  }
+
+  // Toggle Simulation Mode Button
+  if (btnToggleSimMode) {
+    btnToggleSimMode.addEventListener('click', toggleSimulationMode);
+  }
+
+  // Firewall Sync Button
+  if (btnSyncFirewall) {
+    btnSyncFirewall.addEventListener('click', async () => {
+      const icon = btnSyncFirewall.querySelector('i');
+      if (icon) icon.classList.add('animate-spin');
+      try {
+        const res = await fetch(`${API_BASE}/api/firewall/sync`, { method: 'POST' });
+        const data = await res.json();
+        await loadBlockedList();
+        showToast(`🔄 Windows Firewall synchronized (${data.synced_count || 0} active rules)`);
+      } catch (e) {
+        showToast(`⚠️ Sync failed: ${e.message}`);
+      } finally {
+        if (icon) icon.classList.remove('animate-spin');
       }
     });
   }
